@@ -16,6 +16,28 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;1,400&family=Noto+Serif+KR:wght@500;600&family=Noto+Sans+KR:wght@400;500;700&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+body.songs .app-install{
+  position:absolute;top:10px;left:10px;z-index:4;
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  min-height:40px;padding:0 12px;border-radius:999px;
+  border:1.5px solid #e0b85a;background:#12344a;color:#ead087;text-decoration:none;
+  font-family:"Noto Sans KR",sans-serif;font-size:12px;font-weight:700;line-height:1;
+  box-shadow:0 4px 12px rgba(0,0,0,.45);
+}
+body.songs .app-install::before{content:"⬇";font-size:11px;line-height:1}
+body.songs .app-install:active{transform:translateY(1px) scale(.97)}
+body.songs .app-install[hidden]{display:none}
+</style>
+<script>
+document.addEventListener("DOMContentLoaded",function(){
+  var ua=navigator.userAgent||"";
+  var inApp=!!(window.jw3Player||window.jw3PlayerRaw||window.jw3Native)||/; wv\)/.test(ua)||/jw3app/i.test(ua);
+  var android=/Android/i.test(ua);
+  var el=document.getElementById("appInstall");
+  if(el&&android&&!inApp) el.hidden=false;
+});
+</script>
 </head>
 <body class="songs">
 <div class="app">
@@ -31,6 +53,7 @@
         <p class="stage-credit" id="stageCredit">작사·작곡 정완(글렙)</p>
       </div>
       <button type="button" class="media-mode" id="mediaMode" hidden>영상 보기</button>
+      <a class="app-install" id="appInstall" href="download/jw3.apk?v=3" download="jw3.apk" hidden>앱 설치</a>
     </div>
   </section>
   <div class="list-pane">
