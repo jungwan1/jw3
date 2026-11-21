@@ -267,6 +267,7 @@ function showCover(card) {
 let slideBook = {};
 let shownSlide = "";
 let shownVideo = "";
+let snapFullVideo = false;
 const slideA = document.getElementById("slideA");
 const slideB = document.getElementById("slideB");
 const clipA = document.getElementById("clipA");
@@ -304,6 +305,49 @@ function cueAt(time, cues) {
 function videoIdOf(cue) {
   const id = cue && typeof cue.video === "string" ? cue.video.trim() : "";
   return id;
+}
+
+// 한 곡이 처음부터 끝까지 같은 영상 하나면, 그 영상은 소리의 현재 위치에 맞춘다.
+// 1·2번처럼 구간마다 다른 클립은 여기서 걸리지 않고, 클립 처음(0초)부터 재생한다.
+function fullSongVideoId(cues) {
+  if (!cues || !cues.length) return "";
+  const id = videoIdOf(cues[0]);
+  if (!id) return "";
+  for (let i = 1; i < cues.length; i++) {
+    if (videoIdOf(cues[i]) !== id) return "";
+  }
+  return id;
+}
+
+function alignFullClip(el, force) {
+  if (!el || el.readyState < 1) return;
+  let target = Number(media.currentTime) || 0;
+  if (!Number.isFinite(target) || target < 0) target = 0;
+  const dur = el.duration;
+  if (Number.isFinite(dur) && dur > 0 && target > dur) target = dur;
+  if (el.seeking) {
+    const pending = Number(el.dataset.alignTarget);
+    if (Number.isFinite(pending) && Math.abs(pending - target) < 0.05) return;
+  }
+  const drift = Math.abs((el.currentTime || 0) - target);
+  if (!force && drift <= 0.5) return;
+  if (drift < 0.05) return;
+  el.dataset.alignTarget = String(target);
+  if (el._alignKick) el.removeEventListener("seeked", el._alignKick);
+  const kick = () => {
+    el.removeEventListener("seeked", kick);
+    if (el._alignKick === kick) el._alignKick = null;
+    if (media.paused || pageHidden()) return;
+    if (!el.classList.contains("on") || el.dataset.videoId !== shownVideo) return;
+    if (fullSongVideoId(cuesForSong()) !== el.dataset.videoId) return;
+    playClip(el);
+  };
+  el._alignKick = kick;
+  el.addEventListener("seeked", kick);
+  try { el.currentTime = target; } catch (e) {
+    el.removeEventListener("seeked", kick);
+    if (el._alignKick === kick) el._alignKick = null;
+  }
 }
 
 function fillClip(el, id) {
@@ -347,14 +391,25 @@ function playClip(el) {
 function showClip(cue) {
   const id = videoIdOf(cue);
   const loop = !cue || cue.loop !== false;
+  const full = !!id && fullSongVideoId(cuesForSong()) === id;
   if (!wantVideo || !id) {
+    snapFullVideo = false;
     hideClips();
     return;
   }
+  if (!full) snapFullVideo = false;
   if (shownVideo === id) {
     const current = clipOnA ? clipA : clipB;
     current.loop = loop;
     if (current.dataset.videoId === id && current.readyState >= 2 && !current.error) {
+      if (full) {
+        alignFullClip(current, snapFullVideo);
+        snapFullVideo = false;
+        if (current.seeking) {
+          current.classList.add("on");
+          return;
+        }
+      }
       if (current.ended && !current.loop) {
         current.classList.add("on");
         return;
@@ -379,8 +434,10 @@ function showClip(cue) {
     outgoing.classList.remove("on");
     outgoing.pause();
     clipOnA = incoming === clipA;
-    if (incoming.currentTime > 0.05) incoming.currentTime = 0;
-    playClip(incoming);
+    if (full) alignFullClip(incoming, true);
+    else if (incoming.currentTime > 0.05) incoming.currentTime = 0;
+    snapFullVideo = false;
+    if (!full || !incoming.seeking) playClip(incoming);
   };
   incoming.oncanplay = () => { incoming.oncanplay = null; reveal(); };
   incoming.onerror = () => { incoming.onerror = null; if (shownVideo === id) incoming.classList.remove("on"); };
@@ -473,6 +530,7 @@ document.getElementById("mediaMode").addEventListener("click", () => {
   if (document.getElementById("mediaMode").hidden) return;
   wantVideo = !wantVideo;
   if (!wantVideo) hideClips();
+  else snapFullVideo = true;
   syncSlides();
   updateMediaButton();
 });
@@ -1024,6 +1082,7 @@ seek.addEventListener("change", () => {
   if (NATIVE) {
     nat.time = target;
     window.JW3Native.seek(target);
+    snapFullVideo = true;
     syncSlides();
     return;
   }
@@ -1040,11 +1099,19 @@ player.addEventListener("timeupdate", () => {
   if (phase === "song") syncSlides();
   refreshTimes();
 });
-player.addEventListener("seeked", () => { if (phase === "song") syncSlides(); });
+player.addEventListener("seeked", () => {
+  if (phase !== "song") return;
+  snapFullVideo = true;
+  syncSlides();
+});
 player.addEventListener("play", () => {
   if (!wantVideo || pageHidden()) return;
   const el = clipOnA ? clipA : clipB;
   if (!shownVideo || el.dataset.videoId !== shownVideo || el.readyState < 2 || el.error) return;
+  if (fullSongVideoId(cuesForSong()) === shownVideo) {
+    alignFullClip(el, true);
+    if (el.seeking) return;
+  }
   if (el.ended && !el.loop) return;
   el.muted = true;
   el.classList.add("on");
@@ -1052,7 +1119,11 @@ player.addEventListener("play", () => {
   if (pending && typeof pending.catch === "function") pending.catch(() => { el.classList.remove("on"); });
 });
 player.addEventListener("pause", () => {
-  clips.forEach((el) => el.pause());
+  clips.forEach((node) => node.pause());
+  const el = clipOnA ? clipA : clipB;
+  if (wantVideo && shownVideo && el.dataset.videoId === shownVideo && el.readyState >= 2 && !el.error && fullSongVideoId(cuesForSong()) === shownVideo) {
+    alignFullClip(el, true);
+  }
 });
 queueThumb();
 if (NATIVE) NATIVE({ cmd: "hello" });
