@@ -87,37 +87,51 @@
   {
    "t": 0.0,
    "img": "03-1.jpg",
-   "section": "verse1"
+   "section": "verse1",
+   "video": "03-full",
+   "loop": false
   },
   {
    "t": 20.9,
    "img": "03-1.jpg",
-   "section": "pre-chorus"
+   "section": "pre-chorus",
+   "video": "03-full",
+   "loop": false
   },
   {
    "t": 41.0,
    "img": "03-2.jpg",
-   "section": "chorus"
+   "section": "chorus",
+   "video": "03-full",
+   "loop": false
   },
   {
    "t": 63.3,
    "img": "03-3.jpg",
-   "section": "verse2"
+   "section": "verse2",
+   "video": "03-full",
+   "loop": false
   },
   {
    "t": 107.0,
    "img": "03-2.jpg",
-   "section": "chorus"
+   "section": "chorus",
+   "video": "03-full",
+   "loop": false
   },
   {
    "t": 124.2,
    "img": "03-4.jpg",
-   "section": "bridge (언젠가 용기가 생기면)"
+   "section": "bridge (언젠가 용기가 생기면)",
+   "video": "03-full",
+   "loop": false
   },
   {
    "t": 152.0,
    "img": "03-4.jpg",
-   "section": "outro (instrumental)"
+   "section": "outro (instrumental)",
+   "video": "03-full",
+   "loop": false
   }
  ],
  "04": [
