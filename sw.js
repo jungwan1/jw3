@@ -1,4 +1,4 @@
-const CACHE = "jw3-songs-v16";
+const CACHE = "jw3-songs-v17";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
