@@ -112,6 +112,10 @@ body.songs.playing .stage-art{
   width:min(100%,500px,calc(2 * (100dvh - 340px)));
   border-radius:12px;
 }
+body.songs.playing .stage-art.is-wide{
+  aspect-ratio:16/9;
+  width:min(100%,720px,calc((100dvh - 340px) * 16 / 9));
+}
 @media (prefers-reduced-motion:reduce){
   body.songs .stage-art{transition:none}
 }
@@ -125,6 +129,7 @@ body.songs .stage-art .slide-video{
   position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:cover;
   opacity:0;transition:opacity .7s ease;pointer-events:none;background:transparent;
 }
+body.songs .stage-art.is-wide .slide-video{object-fit:contain;background:#12344a}
 body.songs .stage-art .slide-video.on{opacity:1}
 body.songs .stage-caption{
   position:absolute;left:0;right:0;bottom:5%;z-index:3;
