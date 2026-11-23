@@ -28,6 +28,9 @@ body.songs .app-install{
 body.songs .app-install::before{content:"⬇";font-size:11px;line-height:1}
 body.songs .app-install:active{transform:translateY(1px) scale(.97)}
 body.songs .app-install[hidden]{display:none}
+body.songs .transport{flex-wrap:wrap;row-gap:8px}
+body.songs #playShuffle[aria-pressed="true"]{background:linear-gradient(180deg,#ead087,#c4a153);color:#3a2b12}
+@media (max-width:380px){body.songs .transport button{min-width:56px;padding:8px 10px;font-size:12px}}
 </style>
 <script>
 document.addEventListener("DOMContentLoaded",function(){
@@ -64,7 +67,7 @@ document.addEventListener("DOMContentLoaded",function(){
         <p class="stage-credit" id="stageCredit">작사·작곡 정완(글렙)</p>
       </div>
       <button type="button" class="media-mode" id="mediaMode" hidden>영상 보기</button>
-      <a class="app-install" id="appInstall" href="download/jw3.apk?v=3" download="jw3.apk" hidden>앱 설치</a>
+      <a class="app-install" id="appInstall" href="download/jw3.apk?v=4" download="jw3.apk" hidden>앱 설치</a>
     </div>
   </section>
   <div class="list-pane">
@@ -87,6 +90,7 @@ document.addEventListener("DOMContentLoaded",function(){
       <button type="button" id="playPause">일시정지</button>
       <button type="button" id="playNext">다음</button>
       <button type="button" id="playAll" aria-pressed="false"><span id="playAllLabel">연속 듣기</span></button>
+      <button type="button" id="playShuffle" aria-pressed="false">랜덤 듣기</button>
     </div>
   </div>
 </div>
@@ -101,6 +105,7 @@ const playAllLabel = document.getElementById("playAllLabel");
 const playAllStatus = document.getElementById("playAllStatus");
 const playPrev = document.getElementById("playPrev");
 const playNext = document.getElementById("playNext");
+const playShuffle = document.getElementById("playShuffle");
 const songs = (typeof SONGS !== "undefined" && Array.isArray(SONGS)) ? SONGS : [];
 const FADE_MS = 900;
 const GAP_MS = 3000;
@@ -111,6 +116,53 @@ let phase = "idle";
 let fadeFrame = 0;
 let gapTimer = 0;
 let userPaused = false;
+// 재생 순서: order 는 곡 번호(cards 의 순서) 목록, pos 는 그중 지금 위치입니다. 랜덤 듣기면 섞인 순서입니다.
+let order = [];
+let pos = -1;
+let shuffle = false;
+// 곡이 실패했을 때 다시 시도한 횟수와 마지막으로 들은 위치
+let errorTries = 0;
+let lastGoodTime = 0;
+// 전화 등으로 시스템이 멈췄는지(사용자가 누른 일시정지가 아님)
+let interrupted = false;
+let srcChangedAt = 0;
+
+function seqOrder() {
+  return cards.map((_, i) => i);
+}
+function shuffledOrder() {
+  const a = seqOrder();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+function nextIdx() {
+  return (pos >= 0 && pos + 1 < order.length) ? order[pos + 1] : -1;
+}
+function prevIdx() {
+  return pos > 0 ? order[pos - 1] : -1;
+}
+// 곡 사이 3초 쉼: 3초짜리 무음을 같은 <audio> 로 재생합니다.
+// 타이머를 쓰지 않아서 화면이 꺼져 있어도 쉼 뒤 다음 곡으로 넘어갑니다.
+const GAP_URL = (function () {
+  try {
+    const rate = 8000;
+    const n = Math.round(rate * GAP_MS / 1000);
+    const buf = new ArrayBuffer(44 + n);
+    const v = new DataView(buf);
+    const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    str(0, "RIFF"); v.setUint32(4, 36 + n, true); str(8, "WAVE");
+    str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    str(36, "data"); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  } catch (e) {
+    return "";
+  }
+})();
 
 // 안드로이드 앱 안에서는 재생 목록 전체를 앱의 네이티브 플레이어가 재생합니다(화면이 꺼져도 다음 곡으로 넘어감).
 // 이 페이지는 화면 표시와 조작만 맡습니다. 앱이 없으면(일반 브라우저) 아래 <audio> 로 재생합니다.
@@ -125,7 +177,7 @@ const NATIVE = (function () {
   } catch (e) {}
   return null;
 })();
-const nat = { paused: true, time: 0, duration: NaN, holdUrl: "", holdUntil: 0 };
+const nat = { paused: true, time: 0, duration: NaN, holdUrl: "", holdUntil: 0, gap: false, count: 0 };
 const media = {
   get paused() { return NATIVE ? nat.paused : player.paused; },
   get currentTime() { return NATIVE ? nat.time : player.currentTime; },
@@ -138,7 +190,7 @@ function absUrl(path) {
 window.JW3Native = NATIVE ? {
   play(index, list) { NATIVE({ cmd: "play", index: index, list: list }); },
   pause() { NATIVE({ cmd: "pause" }); },
-  resume() { NATIVE({ cmd: "resume" }); },
+  resume() { NATIVE({ cmd: "resume", index: Math.max(0, pos), list: nativeList(), position: nat.time || 0 }); },
   next() { NATIVE({ cmd: "next" }); },
   prev() { NATIVE({ cmd: "prev" }); },
   seek(sec) { NATIVE({ cmd: "seek", position: sec }); },
@@ -146,7 +198,8 @@ window.JW3Native = NATIVE ? {
   state() { NATIVE({ cmd: "state" }); },
 } : null;
 function nativeList() {
-  return cards.map((card) => ({
+  const list = (order.length === cards.length) ? order : seqOrder();
+  return list.map((i) => cards[i]).map((card) => ({
     url: absUrl(card.dataset.audio),
     title: card.dataset.title,
     artist: "정완(글렙)",
@@ -522,6 +575,7 @@ function syncSlides() {
     clips.forEach((el) => el.pause());
     return;
   }
+  if (phase === "gap") return;
   const cues = cuesForSong();
   if (!cues || !cues.length) return;
   showSlide(cueAt(media.currentTime || 0, cues), cues);
@@ -569,6 +623,7 @@ function updateTransport() {
   if (!playlist || cursor < 0) {
     playAllLabel.textContent = "연속 듣기";
     playAll.setAttribute("aria-pressed", "false");
+    playShuffle.setAttribute("aria-pressed", "false");
     if (cursor < 0 && playAllStatus.textContent !== "끝까지 들었습니다") playAllStatus.textContent = "";
     playPrev.disabled = true;
     playNext.disabled = true;
@@ -576,9 +631,13 @@ function updateTransport() {
   }
   playAllLabel.textContent = "정지";
   playAll.setAttribute("aria-pressed", "true");
-  playAllStatus.textContent = phase === "gap" ? "쉬는 중" : "";
-  playPrev.disabled = cursor <= 0;
-  playNext.disabled = cursor >= cards.length - 1;
+  playShuffle.setAttribute("aria-pressed", shuffle ? "true" : "false");
+  const resting = phase === "gap" || (NATIVE && nat.gap && !nat.paused);
+  if (resting) playAllStatus.textContent = "쉬는 중";
+  else if (interrupted && media.paused) playAllStatus.textContent = "멈췄어요 · 재생을 누르면 이어서 들어요";
+  else playAllStatus.textContent = shuffle ? "랜덤 듣기" : "";
+  playPrev.disabled = prevIdx() < 0;
+  playNext.disabled = nextIdx() < 0;
 }
 
 function artworkUrl(path) {
@@ -657,6 +716,10 @@ function stopPlayback() {
   phase = "idle";
   playlist = false;
   cursor = -1;
+  order = [];
+  pos = -1;
+  shuffle = false;
+  interrupted = false;
   if (NATIVE) {
     window.JW3Native.stop();
     nat.paused = true;
@@ -684,10 +747,15 @@ function finishPlaylist() {
   setCurrent(null);
   playAllLabel.textContent = "연속 듣기";
   playAll.setAttribute("aria-pressed", "false");
+  playShuffle.setAttribute("aria-pressed", "false");
   playAllStatus.textContent = "끝까지 들었습니다";
   playPrev.disabled = true;
   playNext.disabled = true;
   cursor = -1;
+  order = [];
+  pos = -1;
+  shuffle = false;
+  interrupted = false;
   updateSession();
 }
 
@@ -736,14 +804,25 @@ function playAudio() {
   }
 }
 
-function startSong(index, fade) {
+function startSong(index, fade, newOrder) {
   clearGapTimer();
   if (index < 0 || index >= cards.length) {
     finishPlaylist();
     return;
   }
+  if (Array.isArray(newOrder) && newOrder.length) {
+    order = newOrder;
+  } else if (!playlist || order.length !== cards.length || order.indexOf(index) < 0) {
+    // 새로 시작하면 목록 순서대로, 이 곡부터 마지막 곡까지 이어서 듣습니다.
+    order = seqOrder();
+    shuffle = false;
+  }
+  pos = order.indexOf(index);
   playlist = true;
   userPaused = false;
+  interrupted = false;
+  errorTries = 0;
+  lastGoodTime = 0;
   cursor = index;
   phase = "song";
   cancelAnimationFrame(fadeFrame);
@@ -754,10 +833,11 @@ function startSong(index, fade) {
     nat.duration = NaN;
     nat.holdUrl = absUrl(cards[index].dataset.audio);
     nat.holdUntil = Date.now() + 5000;
-    window.JW3Native.play(index, nativeList());
+    window.JW3Native.play(pos, nativeList());
   } else {
     // 같은 <audio> 하나에 주소만 바꾸고 바로(기다림 없이) play() 합니다. 화면이 꺼진 상태에서도 이어지게 하려는 것입니다.
     player.volume = 1;
+    srcChangedAt = Date.now();
     player.src = cards[index].dataset.audio;
     playAudio();
     if (fade && !pageHidden()) fadeIn();
@@ -770,62 +850,84 @@ function startSong(index, fade) {
 
 function scheduleNext() {
   clearGapTimer();
-  if (!playlist || cursor + 1 >= cards.length) {
+  const next = nextIdx();
+  if (!playlist || next < 0) {
     finishPlaylist();
     return;
   }
-  if (!canRest()) {
-    startSong(cursor + 1, false);
+  if (NATIVE || !GAP_URL || !(GAP_MS > 0)) {
+    startSong(next, false);
     return;
   }
   phase = "gap";
-  updateTransport();
-  updateSession();
+  cancelAnimationFrame(fadeFrame);
+  player.volume = 1;
+  srcChangedAt = Date.now();
+  player.src = GAP_URL;
+  const pending = player.play();
+  if (pending && typeof pending.catch === "function") {
+    pending.catch(() => { if (phase === "gap" && !userPaused) startSong(nextIdx(), false); });
+  }
+  // 무음의 'ended' 를 놓쳤을 때를 대비한 예비 타이머(화면이 켜져 있을 때만 의미가 있습니다).
   gapTimer = setTimeout(() => {
     gapTimer = 0;
-    if (phase !== "gap" || !playlist) return;
-    startSong(cursor + 1, true);
-  }, GAP_MS);
+    if (phase === "gap" && playlist && !userPaused && (player.ended || player.paused)) startSong(nextIdx(), !pageHidden());
+  }, GAP_MS + 2500);
+  updateTransport();
+  updateSession();
 }
 
 // 곡이 끝났을 때 한 번만 다음 곡으로 넘깁니다('ended' 를 놓친 경우 'pause'/'timeupdate' 에서도 잡습니다).
 let endHandledFor = "";
 function handleEnded() {
-  if (NATIVE || phase !== "song") return;
+  if (NATIVE) return;
+  if (phase === "gap") {
+    if (endHandledFor === "gap" || userPaused) return;
+    endHandledFor = "gap";
+    startSong(nextIdx(), !pageHidden());
+    return;
+  }
+  if (phase !== "song") return;
   const src = player.currentSrc || player.src || "";
   if (endHandledFor === src) return;
   endHandledFor = src;
   scheduleNext();
 }
 
-// 화면이 실제로 그려지고 있는지(=화면이 켜져 있는지) 곡 끝 무렵에만 requestAnimationFrame 으로 확인합니다.
-// 화면이 꺼지면 rAF 가 멈추므로, 그때는 쉬지 않고 'ended' 안에서 바로 다음 곡을 시작합니다.
-let lastFrameAt = 0;
-let probeUntil = 0;
-let probing = false;
-function armFrameProbe() {
-  probeUntil = performance.now() + 10000;
-  if (probing) return;
-  probing = true;
-  const step = (now) => {
-    lastFrameAt = performance.now();
-    if (lastFrameAt > probeUntil || pageHidden()) {
-      probing = false;
-      return;
-    }
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-function canRest() {
-  if (pageHidden()) return false;
-  return performance.now() - lastFrameAt < 700;
+// 재생 버튼(화면·알림·잠금 화면): 지금 곡부터 목록 끝까지 연속 재생을 다시 이어 갑니다.
+function resumePlayback() {
+  if (cursor < 0 || !cards[cursor]) return;
+  userPaused = false;
+  interrupted = false;
+  if (order.length !== cards.length || order.indexOf(cursor) < 0) {
+    order = seqOrder();
+    shuffle = false;
+  }
+  pos = order.indexOf(cursor);
+  playlist = true;
+  if (phase === "idle") phase = "song";
+  if (NATIVE) {
+    playAudio();
+    updateTransport();
+    return;
+  }
+  const want = phase === "gap" ? GAP_URL : absUrl(cards[cursor].dataset.audio);
+  if (!player.getAttribute("src") || (player.currentSrc && player.currentSrc !== want)) {
+    if (phase === "gap") startSong(nextIdx(), false);
+    else startSong(cursor, false);
+    return;
+  }
+  playAudio();
+  updateTransport();
 }
 
-function restNow() {
-  if (!playlist || phase !== "gap") return;
+function pauseByUser() {
+  userPaused = true;
+  interrupted = false;
   clearGapTimer();
-  startSong(cursor + 1, !pageHidden());
+  if (phase === "song" || phase === "gap") pauseAudio();
+  updateSession();
+  updateTransport();
 }
 
 // 다음 곡을 미리 받아 둡니다(곡 끝 30초 전부터, 다음 곡 하나만).
@@ -835,10 +937,11 @@ if (preloader) {
   preloader.muted = true;
 }
 function preloadNext() {
-  if (!preloader || !playlist || cursor + 1 >= cards.length) return;
+  const n = nextIdx();
+  if (!preloader || !playlist || n < 0) return;
   const conn = navigator.connection;
   if (conn && conn.saveData) return;
-  const next = absUrl(cards[cursor + 1].dataset.audio);
+  const next = absUrl(cards[n].dataset.audio);
   if (preloader.src !== next) {
     preloader.src = next;
     try { preloader.load(); } catch (e) {}
@@ -847,7 +950,46 @@ function preloadNext() {
 
 player.addEventListener("ended", handleEnded);
 player.addEventListener("pause", () => {
-  if (!NATIVE && phase === "song" && !userPaused && player.ended) handleEnded();
+  if (NATIVE || userPaused) return;
+  if ((phase === "song" || phase === "gap") && player.ended) {
+    handleEnded();
+    return;
+  }
+  // 곡 중간에 시스템이 멈춤(전화 등). 보통은 전화가 끝나면 브라우저가 다시 틀어 주고,
+  // 아니면 재생 버튼 한 번으로 지금 곡부터 연속 재생이 이어집니다.
+  if (phase === "song" && playlist && Date.now() - srcChangedAt > 500) interrupted = true;
+  updateTransport();
+});
+player.addEventListener("playing", () => {
+  if (NATIVE) return;
+  if (interrupted) {
+    interrupted = false;
+    updateTransport();
+  }
+});
+// 곡을 못 받으면(네트워크 끊김 등) 같은 자리에서 두 번 다시 시도하고, 그래도 안 되면 다음 곡으로 넘어갑니다.
+player.addEventListener("error", () => {
+  if (NATIVE || !playlist || userPaused) return;
+  if (phase === "gap") {
+    startSong(nextIdx(), false);
+    return;
+  }
+  if (phase !== "song" || cursor < 0) return;
+  const at = cursor;
+  if (errorTries < 2) {
+    errorTries += 1;
+    const resumeAt = lastGoodTime;
+    setTimeout(() => {
+      if (cursor !== at || phase !== "song" || userPaused) return;
+      player.src = cards[at].dataset.audio;
+      if (resumeAt > 1) {
+        player.addEventListener("loadedmetadata", () => { try { player.currentTime = resumeAt; } catch (e) {} }, { once: true });
+      }
+      playAudio();
+    }, 1500 * errorTries);
+    return;
+  }
+  scheduleNext();
 });
 document.addEventListener("visibilitychange", () => {
   if (pageHidden()) {
@@ -855,14 +997,9 @@ document.addEventListener("visibilitychange", () => {
     cancelAnimationFrame(fadeFrame);
     if (!NATIVE) player.volume = 1;
     clips.forEach((el) => el.pause());
-    if (playlist && phase === "gap") restNow();
     return;
   }
   if (NATIVE) window.JW3Native.state();
-  if (playlist && phase === "gap") {
-    restNow();
-    return;
-  }
   if (cursor >= 0 && cards[cursor]) {
     syncSlides();
     refreshTimes();
@@ -870,17 +1007,23 @@ document.addEventListener("visibilitychange", () => {
   }
   updateTransport();
 });
-window.addEventListener("pagehide", () => { if (playlist && phase === "gap") restNow(); });
-document.addEventListener("freeze", () => { if (playlist && phase === "gap") restNow(); });
 player.addEventListener("play", updateSession);
 player.addEventListener("pause", updateSession);
 player.addEventListener("timeupdate", () => {
-  if (NATIVE || phase !== "song") return;
+  if (NATIVE) return;
+  if (phase === "gap") {
+    if (player.ended) handleEnded();
+    return;
+  }
+  if (phase !== "song") return;
   updatePosition(false);
   const dur = player.duration;
   if (!Number.isFinite(dur) || dur <= 0) return;
+  if (player.currentTime > 0) {
+    lastGoodTime = player.currentTime;
+    if (errorTries && player.currentTime > 5) errorTries = 0;
+  }
   const left = dur - (player.currentTime || 0);
-  if (left < 8 && !pageHidden()) armFrameProbe();
   if (left < 30) preloadNext();
   if (player.ended || (left < 0.05 && player.paused && !userPaused)) handleEnded();
 });
@@ -916,10 +1059,17 @@ window.JW3NativeEvent = function (s) {
   if (idx < 0 && s.index >= 0 && s.index < cards.length) idx = s.index;
   if (idx < 0) return;
   nat.paused = !s.playing;
+  nat.gap = !!s.gap;
+  nat.count = Number(s.count) || 0;
   nat.time = Number(s.position) || 0;
   nat.duration = Number(s.duration) > 0 ? Number(s.duration) : NaN;
   if (idx !== cursor || !playlist || phase !== "song") {
     clearGapTimer();
+    if (order.length !== cards.length || order.indexOf(idx) < 0) {
+      order = seqOrder();
+      shuffle = false;
+    }
+    pos = order.indexOf(idx);
     playlist = true;
     phase = "song";
     cursor = idx;
@@ -936,18 +1086,8 @@ if ("mediaSession" in navigator) {
   const bind = (name, fn) => {
     try { navigator.mediaSession.setActionHandler(name, fn); } catch (e) {}
   };
-  bind("play", () => {
-    userPaused = false;
-    if (phase === "gap") scheduleNext();
-    else playAudio();
-  });
-  bind("pause", () => {
-    userPaused = true;
-    clearGapTimer();
-    if (phase === "song") pauseAudio();
-    updateSession();
-    updateTransport();
-  });
+  bind("play", () => { resumePlayback(); });
+  bind("pause", () => { pauseByUser(); });
   bind("stop", () => { stopPlayback(); });
   bind("seekto", (details) => {
     if (NATIVE || phase !== "song" || !details || !Number.isFinite(details.seekTime)) return;
@@ -958,11 +1098,11 @@ if ("mediaSession" in navigator) {
     updatePosition(true);
   });
   bind("previoustrack", () => {
-    if (cursor > 0) startSong(cursor - 1, false);
-    else if (cursor === 0) startSong(0, false);
+    if (prevIdx() >= 0) startSong(prevIdx(), false);
+    else if (cursor >= 0) startSong(cursor, false);
   });
   bind("nexttrack", () => {
-    if (cursor + 1 < cards.length) startSong(cursor + 1, false);
+    if (nextIdx() >= 0) startSong(nextIdx(), false);
   });
 }
 
@@ -1048,16 +1188,28 @@ if (!songs.length) {
   });
   if (!cards.length) playAll.disabled = true;
 }
+if (!cards.length) playShuffle.disabled = true;
 
 playAll.addEventListener("click", () => {
   if (playlist) stopPlayback();
-  else startSong(0, false);
+  else startSong(0, false, seqOrder());
+});
+// 랜덤 듣기: 전체 곡을 섞어서 처음부터 끝까지 이어 듣습니다. 랜덤 중에 다시 누르면 멈춥니다.
+playShuffle.addEventListener("click", () => {
+  if (!cards.length) return;
+  if (playlist && shuffle) {
+    stopPlayback();
+    return;
+  }
+  const mixed = shuffledOrder();
+  shuffle = true;
+  startSong(mixed[0], false, mixed);
 });
 playPrev.addEventListener("click", () => {
-  if (cursor > 0) startSong(cursor - 1, false);
+  if (prevIdx() >= 0) startSong(prevIdx(), false);
 });
 playNext.addEventListener("click", () => {
-  if (cursor + 1 < cards.length) startSong(cursor + 1, false);
+  if (nextIdx() >= 0) startSong(nextIdx(), false);
 });
 const playPause = document.getElementById("playPause");
 const seek = document.getElementById("seek");
@@ -1072,17 +1224,11 @@ function fmt(sec) {
 }
 playPause.addEventListener("click", () => {
   if (cursor < 0) return;
-  if (userPaused || (media.paused && phase === "song")) {
-    userPaused = false;
-    if (phase === "gap") scheduleNext();
-    else playAudio();
+  if (userPaused || media.paused) {
+    resumePlayback();
     return;
   }
-  userPaused = true;
-  clearGapTimer();
-  if (phase === "song") pauseAudio();
-  updateSession();
-  updateTransport();
+  pauseByUser();
 });
 seek.addEventListener("pointerdown", () => { seeking = true; });
 seek.addEventListener("pointerup", () => { seeking = false; });
@@ -1116,7 +1262,7 @@ player.addEventListener("seeked", () => {
   syncSlides();
 });
 player.addEventListener("play", () => {
-  if (!wantVideo || pageHidden()) return;
+  if (phase !== "song" || !wantVideo || pageHidden()) return;
   const el = clipOnA ? clipA : clipB;
   if (!shownVideo || el.dataset.videoId !== shownVideo || el.readyState < 2 || el.error) return;
   if (fullSongVideoId(cuesForSong()) === shownVideo) {
