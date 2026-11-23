@@ -66,7 +66,8 @@ document.addEventListener("DOMContentLoaded",function(){
         <p class="slide-title" id="slideTitle"></p>
         <p class="stage-credit" id="stageCredit">작사·작곡 정완(글렙)</p>
       </div>
-      <button type="button" class="media-mode" id="mediaMode" hidden>영상 보기</button>
+      <button type="button" class="media-mode" id="mediaMode" data-state="photo" hidden>영상 보기</button>
+      <button type="button" class="media-mode photo-back" id="photoMode" hidden>사진 보기</button>
       <a class="app-install" id="appInstall" href="download/jw3.apk?v=4" download="jw3.apk" hidden>앱 설치</a>
     </div>
   </section>
@@ -283,12 +284,14 @@ listTrack.addEventListener("pointerup", () => { thumbDrag = null; });
 listTrack.addEventListener("pointercancel", () => { thumbDrag = null; });
 
 let wantVideo = false;
+let videoFull = false;
 let videoSongKey = "";
 
 function rememberSong(card) {
   const key = card ? String(card.dataset.audio || "") : "";
   if (key !== videoSongKey) {
     wantVideo = false;
+    videoFull = false;
     videoSongKey = key;
   }
 }
@@ -592,21 +595,66 @@ function syncSlides() {
   updateMediaButton();
 }
 
+function leaveFullView() {
+  videoFull = false;
+  document.body.classList.remove("video-full");
+}
+
 function updateMediaButton() {
   const btn = document.getElementById("mediaMode");
+  const photo = document.getElementById("photoMode");
   const cues = cuesForSong();
   const enabled = document.body.classList.contains("playing") && !!(cues && cues.some((cue) => videoIdOf(cue)));
+  if (!wantVideo) leaveFullView();
   btn.hidden = !enabled;
-  btn.textContent = wantVideo ? "사진 보기" : "영상 보기";
-  btn.setAttribute("aria-pressed", wantVideo ? "true" : "false");
+  if (!wantVideo) {
+    btn.textContent = "영상 보기";
+    btn.dataset.state = "photo";
+    btn.setAttribute("aria-pressed", "false");
+  } else if (!videoFull) {
+    btn.textContent = "전체보기";
+    btn.dataset.state = "expand";
+    btn.setAttribute("aria-pressed", "true");
+  } else {
+    btn.textContent = "되돌리기";
+    btn.dataset.state = "return";
+    btn.setAttribute("aria-pressed", "true");
+  }
+  if (photo) photo.hidden = !enabled || !wantVideo || videoFull;
 }
 
 document.getElementById("mediaMode").addEventListener("click", () => {
-  if (document.getElementById("mediaMode").hidden) return;
-  wantVideo = !wantVideo;
-  if (!wantVideo) hideClips();
-  else snapFullVideo = true;
+  const btn = document.getElementById("mediaMode");
+  if (btn.hidden) return;
+  if (!wantVideo) {
+    wantVideo = true;
+    snapFullVideo = true;
+    syncSlides();
+    updateMediaButton();
+    return;
+  }
+  if (!videoFull) {
+    videoFull = true;
+    document.body.classList.add("video-full");
+    updateMediaButton();
+    return;
+  }
+  leaveFullView();
+  updateMediaButton();
+});
+
+document.getElementById("photoMode").addEventListener("click", () => {
+  if (document.getElementById("photoMode").hidden) return;
+  wantVideo = false;
+  leaveFullView();
+  hideClips();
   syncSlides();
+  updateMediaButton();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !videoFull) return;
+  leaveFullView();
   updateMediaButton();
 });
 
