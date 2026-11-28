@@ -138,42 +138,58 @@
   {
    "t": 0.0,
    "img": "04-1.jpg",
-   "section": "intro/verse1"
+   "section": "intro/verse1",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 51.9,
    "img": "04-1.jpg",
-   "section": "pre-chorus"
+   "section": "pre-chorus",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 59.0,
    "img": "04-2.jpg",
-   "section": "chorus"
+   "section": "chorus",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 88.0,
    "img": "04-2.jpg",
-   "section": "interlude"
+   "section": "interlude",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 100.0,
    "img": "04-3.jpg",
-   "section": "verse2"
+   "section": "verse2",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 133.8,
    "img": "04-3.jpg",
-   "section": "pre-chorus"
+   "section": "pre-chorus",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 145.5,
    "img": "04-2.jpg",
-   "section": "chorus"
+   "section": "chorus",
+   "video": "04-full",
+   "loop": false
   },
   {
    "t": 176.0,
    "img": "04-4.jpg",
-   "section": "outro (창밖이 조금 밝아와 / 잠들어도 될 것 같아)"
+   "section": "outro (창밖이 조금 밝아와 / 잠들어도 될 것 같아)",
+   "video": "04-full",
+   "loop": false
   }
  ],
  "05": [
@@ -239,32 +255,44 @@
   {
    "t": 0.0,
    "img": "07-1.jpg",
-   "section": "intro/verse1"
+   "section": "intro/verse1",
+   "video": "07-full",
+   "loop": false
   },
   {
    "t": 43.0,
    "img": "07-2.jpg",
-   "section": "chorus"
+   "section": "chorus",
+   "video": "07-full",
+   "loop": false
   },
   {
    "t": 74.0,
    "img": "07-3.jpg",
-   "section": "verse2"
+   "section": "verse2",
+   "video": "07-full",
+   "loop": false
   },
   {
    "t": 113.7,
    "img": "07-2.jpg",
-   "section": "chorus"
+   "section": "chorus",
+   "video": "07-full",
+   "loop": false
   },
   {
    "t": 142.2,
    "img": "07-4.jpg",
-   "section": "bridge (밤기차 / 자작나무)"
+   "section": "bridge (밤기차 / 자작나무)",
+   "video": "07-full",
+   "loop": false
   },
   {
    "t": 166.7,
    "img": "07-5.jpg",
-   "section": "final/outro (혼자서도 괜찮았던 나)"
+   "section": "final/outro (혼자서도 괜찮았던 나)",
+   "video": "07-full",
+   "loop": false
   }
  ],
  "08": [
